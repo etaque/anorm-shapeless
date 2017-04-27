@@ -11,12 +11,26 @@ case class Dummy(
   someString: String
 )
 
-
 trait ParamsEncoder[A] {
   def encode(value: A): Seq[NamedParameter]
 }
 
+trait TypedParameterValue[A] {
+  def apply(a: A): ParameterValue
+}
+
+object TypedParameterValue {
+  implicit val intParamValue = new TypedParameterValue[Int]{
+    def apply(a: Int) = ParameterValue.toParameterValue(a)
+  }
+
+  implicit val stringParamValue = new TypedParameterValue[String]{
+    def apply(a: String) = ParameterValue.toParameterValue(a)
+  }
+}
+
 object ParamsEncoder {
+
   def apply[A](implicit enc: ParamsEncoder[A]): ParamsEncoder[A] = enc
 
   def createEncoder[A](fn: A => Seq[NamedParameter]): ParamsEncoder[A] =
@@ -31,14 +45,15 @@ object ParamsEncoder {
   implicit def hlistParamsEncoder[K <: Symbol, H, T <: HList](
     implicit
       witness: Witness.Aux[K],
-    toSql: Lazy[ToSql[H]],
-    toStmt: Lazy[ToStatement[H]],
+    paramValue: Lazy[TypedParameterValue[H]],
+    // toSql: Lazy[ToSql[H]],
+    // toStmt: Lazy[ToStatement[H]],
     tEncoder: ParamsEncoder[T]
   ): ParamsEncoder[FieldType[K, H] :: T] = {
     val fieldName: String = witness.value.name
     createEncoder { hlist =>
       val value: H = hlist.head
-      val head = ParameterValue.toParameterValue(value)(toSql.value, toStmt.value) //hEncoder.value.encode(hlist.head)
+      val head = paramValue.value(value)//(toSql.value, toStmt.value) //hEncoder.value.encode(hlist.head)
       val tail = tEncoder.encode(hlist.tail)
       NamedParameter(fieldName, head) +: tail
     }
@@ -52,11 +67,13 @@ object ParamsEncoder {
     createEncoder { value =>
       hEncoder.value.encode(generic.to(value))
     }
+
 }
 
 object TestDAO {
-  val dummyGen = LabelledGeneric[Dummy]
-  ParamsEncoder[Dummy].encode(Dummy(1, "test"))
+  // def p[H <: HList] = ParamsEncoder.genericParamsEncoder[Dummy, H]
+  // val dummyGen = LabelledGeneric[Dummy]
+  println("What: " + ParamsEncoder[Dummy].encode(Dummy(1, "test")))
   // def insert[A](value: A)(implicit pb: ParamBuilder[A]): Unit = {
   //   pb.toParam(value)
   // }
