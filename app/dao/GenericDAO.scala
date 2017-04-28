@@ -16,7 +16,14 @@ trait GenericDAO[T] {
   val idField = "id"
 
   def encode(item: T): Seq[NamedParameter] = {
-    paramsEncoder.encode(item).namedParameters
+    paramsEncoder.encode(item) match {
+      case AnormFinalValue(_) =>
+        // dead branch
+        Nil
+
+      case AnormValueGroup(items) =>
+        items.map { case (n, v) => NamedParameter(n, v.value) }
+    }
   }
 
   def create(item: T)(implicit conn: Connection): Boolean = {
@@ -43,20 +50,14 @@ trait GenericDAO[T] {
 }
 
 
-sealed trait AnormValue {
-  def namedParameters: Seq[NamedParameter]
-}
-case class AnormFinalValue(value: ParameterValue) extends AnormValue {
-  def namedParameters = Nil
-}
+sealed trait AnormValue
+case class AnormFinalValue(value: ParameterValue) extends AnormValue
 case class AnormValueGroup(items: Seq[(String, AnormFinalValue)]) extends AnormValue {
-  def namedParameters = items.map { case (n, v) => NamedParameter(n, v.value) }
-
   def concat(other: AnormValue) = other match {
     case AnormValueGroup(otherItems) =>
       AnormValueGroup(items ++ otherItems)
     case AnormFinalValue(_) =>
-      println("SHOULD NOT HAPPEN")
+      // dead branch
       this
   }
 }
