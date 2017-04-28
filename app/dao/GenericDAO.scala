@@ -15,6 +15,8 @@ trait GenericDAO[T] {
   def paramsEncoder: ParamsEncoder[T]
   val idField = "id"
 
+  def scalaToSqlName(s: String) = s
+
   def encode(item: T): Seq[NamedParameter] = {
     paramsEncoder.encode(item) match {
       case AnormFinalValue(_) =>
@@ -22,7 +24,7 @@ trait GenericDAO[T] {
         Nil
 
       case AnormValueGroup(items) =>
-        items.map { case (n, v) => NamedParameter(n, v.value) }
+        items.map { case (n, v) => NamedParameter(scalaToSqlName(n), v.value) }
     }
   }
 
