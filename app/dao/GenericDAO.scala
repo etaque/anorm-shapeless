@@ -42,16 +42,6 @@ trait ParamsEncoder[A] {
   def encode(value: A): Seq[NamedParameter]
 }
 
-trait ToParameterValues[A] {
-  def apply(a: A): ParameterValue
-}
-
-object ToParameterValues {
-  implicit def toParamValue[A](implicit s: ToSql[A] = null, p: ToStatement[A]) = new ToParameterValues[A]{
-    def apply(a: A) = ParameterValue.toParameterValue[A](a)
-  }
-}
-
 object ParamsEncoder {
 
   def apply[A](implicit enc: ParamsEncoder[A]): ParamsEncoder[A] = enc
@@ -68,13 +58,13 @@ object ParamsEncoder {
   implicit def hlistParamsEncoder[K <: Symbol, H, T <: HList](
     implicit
       witness: Witness.Aux[K],
-    paramValue: Lazy[ToParameterValues[H]],
+    toParamValue: Lazy[ToParameterValues[H]],
     tEncoder: ParamsEncoder[T]
   ): ParamsEncoder[FieldType[K, H] :: T] = {
     val fieldName: String = witness.value.name
     createEncoder { hlist =>
       val value: H = hlist.head
-      val head = paramValue.value(value)//(toSql.value, toStmt.value) //hEncoder.value.encode(hlist.head)
+      val head = toParamValue.value(value)
       val tail = tEncoder.encode(hlist.tail)
       NamedParameter(fieldName, head) +: tail
     }
@@ -89,3 +79,14 @@ object ParamsEncoder {
       hEncoder.value.encode(generic.to(value))
     }
 }
+
+trait ToParameterValues[A] {
+  def apply(a: A): ParameterValue
+}
+
+object ToParameterValues {
+  implicit def toParamValue[A](implicit s: ToSql[A] = null, p: ToStatement[A]) = new ToParameterValues[A]{
+    def apply(a: A) = ParameterValue.toParameterValue[A](a)
+  }
+}
+
