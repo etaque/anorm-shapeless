@@ -2,6 +2,7 @@ package models
 
 case class Dummy(
   meta: Meta,
+  status: Status,
   someInt: Int,
   someString: String,
   someBool: Boolean,
@@ -13,4 +14,8 @@ case class Meta(
   createdAt: Long
 )
 
-
+sealed trait Status { def code: String }
+object Status {
+  case object Pending extends Status { val code = "pending" }
+  case object Active extends Status { val code = "active" }
+}

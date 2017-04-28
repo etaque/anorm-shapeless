@@ -75,7 +75,10 @@ object ParamsEncoder {
         fn(value)
     }
 
-  implicit def toFinalValue[A](implicit s: ToSql[A] = null, p: ToStatement[A]) =
+  def customEncoder[A, B](fn: A => B)(implicit bEncoder: ParamsEncoder[B]): ParamsEncoder[A] =
+    createEncoder((a: A) => bEncoder.encode(fn(a)))
+
+  implicit def valueEncoder[A](implicit s: ToSql[A] = null, p: ToStatement[A]) =
     createEncoder((a: A) => AnormFinalValue(ParameterValue.toParameterValue[A](a)))
 
   implicit val hnilEncoder: ParamsEncoder[HNil] =
@@ -100,6 +103,19 @@ object ParamsEncoder {
       }
     }
   }
+
+  implicit val cnilEncoder: ParamsEncoder[CNil] =
+    createEncoder(cnil => AnormValueGroup(Nil))
+
+  implicit def coproductEncoder[H, T <: Coproduct](
+    implicit hEncoder: Lazy[ParamsEncoder[H]], tEncoder: ParamsEncoder[T]
+  ): ParamsEncoder[H :+: T] =
+    createEncoder {
+      case Inl(h) =>
+        hEncoder.value.encode(h)
+      case Inr(t) =>
+        tEncoder.encode(t)
+    }
 
   implicit def genericEncoder[A, H <: HList](
     implicit
