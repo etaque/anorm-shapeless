@@ -129,3 +129,64 @@ object ParamsEncoder {
 
 
 
+//RowParser[+A].apply = (v1: Row) => SqlResult[A]
+//RowParser.apply(f: (Row) ⇒ SqlResult[A]): RowParser[A]
+
+object GenericRowParser {
+
+  // def hconsParser[H: RowParser, T <: HList : RowParser]: RowParser[H :: T] =
+  //   RowParser{row => 
+      
+  //   }
+  
+}
+
+trait FieldToParser[A <: HList] {
+  type Out <: HList
+  def apply(): Out
+}
+
+object FieldToParser {
+
+    type Aux[A <: HList, Out0 <: HList] = FieldToParser[A] { type Out = Out0 }
+
+    // This is needed to help scalac keep track of the real type
+    // (else it shadows everything behind Out
+    def apply[L <: HList](implicit fp: FieldToParser[L]): Aux[L, fp.Out] = fp
+
+    implicit val hnilFieldToParser: Aux[HNil, HNil] = new FieldToParser[HNil] {
+      type Out = HNil
+      def apply(): HNil = HNil
+    }
+
+    implicit def hconsFieldToParser[K <: Symbol, A, B <: HList](
+      implicit w: FieldToParser[B], // Transform the tail
+      c: Column[A] // Make sure the type is parseable by anorm
+      ): Aux[FieldType[K, A] :: B, (Symbol => RowParser[A]) :: w.Out] =
+      new FieldToParser[FieldType[K, A]:: B] {
+        type Out = (Symbol => RowParser[A]) :: w.Out
+        def apply(): Out = { (x: Symbol) => get[A](x.name) } :: w()
+      }
+
+    def genericParser[Entity, LHL <: HList, HL <: HList, KOut <: HList](
+      implicit labelledGeneric: LabelledGeneric.Aux[Entity, LHL],
+      gen: Generic.Aux[Entity, HL],
+      keys: Keys.Aux[LHL, KOut],
+      toParser: FieldToParser[LHL],
+      unif: shapeless.ops.hlist.SubtypeUnifier[KOut, Symbol]
+    ) {
+      val functionList = FieldToParser[labelledGeneric.Repr].apply()
+
+      val keysUnified = keys().unifySubtypes[Symbol]
+
+      val parsers = functionList zipApply keysUnified
+
+      object composeParsers extends Poly2 {
+        implicit def merge[A, B] = at[RowParser[A], RowParser[B]]((fp: RowParser[A], parseAcc: RowParser[B]) => fp ~ parseAcc)
+      }
+
+      parsers.tail.foldLeft(parsers.head)(composeParsers).map(x => gen.from(hlist(x)))
+
+      ???
+    }
+}
