@@ -12,11 +12,15 @@ import shapeless.labelled.FieldType
 
 trait GenericDAO[T] {
   def table: String
-  def encoder: ParamsEncoder[T]
+  def paramsEncoder: ParamsEncoder[T]
   val idField = "id"
 
+  def encode(item: T): Seq[NamedParameter] = {
+    paramsEncoder.encode(item).namedParameters
+  }
+
   def create(item: T)(implicit conn: Connection): Boolean = {
-    val params = encoder.encode(item)
+    val params = encode(item)
     val fields = params.map(_.name).filter(_ != idField)
     val placeholders = fields.map(n => s"{$n}").mkString(", ")
 
@@ -26,7 +30,7 @@ trait GenericDAO[T] {
   }
 
   def update(item: T)(implicit conn: Connection): Int = {
-    val params = encoder.encode(item)
+    val params = encode(item)
 
     val updates = params.map(_.name).filterNot(_ == idField).map { n =>
       s"$n = {$n}"
@@ -38,39 +42,65 @@ trait GenericDAO[T] {
   }
 }
 
+
+sealed trait AnormValue {
+  def namedParameters: Seq[NamedParameter]
+}
+case class AnormFinalValue(value: ParameterValue) extends AnormValue {
+  def namedParameters = Nil
+}
+case class AnormValueGroup(items: Seq[(String, AnormFinalValue)]) extends AnormValue {
+  def namedParameters = items.map { case (n, v) => NamedParameter(n, v.value) }
+
+  def concat(other: AnormValue) = other match {
+    case AnormValueGroup(otherItems) =>
+      AnormValueGroup(items ++ otherItems)
+    case AnormFinalValue(_) =>
+      println("SHOULD NOT HAPPEN")
+      this
+  }
+}
+
 trait ParamsEncoder[A] {
-  def encode(value: A): Seq[NamedParameter]
+  def encode(value: A): AnormValue
 }
 
 object ParamsEncoder {
-
   def apply[A](implicit enc: ParamsEncoder[A]): ParamsEncoder[A] = enc
 
-  def createEncoder[A](fn: A => Seq[NamedParameter]): ParamsEncoder[A] =
+  def createEncoder[A](fn: A => AnormValue): ParamsEncoder[A] =
     new ParamsEncoder[A] {
-      def encode(value: A): Seq[NamedParameter] =
+      def encode(value: A): AnormValue =
         fn(value)
     }
 
-  implicit val hnilEncoder: ParamsEncoder[HNil] =
-    createEncoder(hnil => Nil)
+  implicit def toFinalValue[A](implicit s: ToSql[A] = null, p: ToStatement[A]) =
+    createEncoder((a: A) => AnormFinalValue(ParameterValue.toParameterValue[A](a)))
 
-  implicit def hlistParamsEncoder[K <: Symbol, H, T <: HList](
+  implicit val hnilEncoder: ParamsEncoder[HNil] =
+    createEncoder(hnil => AnormValueGroup(Nil))
+
+  implicit def hlistGroupEncoder[K <: Symbol, H, T <: HList](
     implicit
       witness: Witness.Aux[K],
-    toParamValue: Lazy[ToParameterValues[H]],
+    hEncoder: Lazy[ParamsEncoder[H]],
     tEncoder: ParamsEncoder[T]
   ): ParamsEncoder[FieldType[K, H] :: T] = {
     val fieldName: String = witness.value.name
     createEncoder { hlist =>
       val value: H = hlist.head
-      val head = toParamValue.value(value)
+      val encodedHead = hEncoder.value.encode(value)
       val tail = tEncoder.encode(hlist.tail)
-      NamedParameter(fieldName, head) +: tail
+      encodedHead match {
+        case fv: AnormFinalValue =>
+          AnormValueGroup(Seq(fieldName -> fv)).concat(tail)
+        case g: AnormValueGroup =>
+          g.concat(tail)
+      }
     }
   }
 
-  implicit def genericParamsEncoder[A, H <: HList](
+  implicit def genericEncoder[A, H <: HList](
     implicit
       generic: LabelledGeneric.Aux[A, H],
     hEncoder: Lazy[ParamsEncoder[H]]
@@ -80,13 +110,5 @@ object ParamsEncoder {
     }
 }
 
-trait ToParameterValues[A] {
-  def apply(a: A): ParameterValue
-}
 
-object ToParameterValues {
-  implicit def toParamValue[A](implicit s: ToSql[A] = null, p: ToStatement[A]) = new ToParameterValues[A]{
-    def apply(a: A) = ParameterValue.toParameterValue[A](a)
-  }
-}
 
