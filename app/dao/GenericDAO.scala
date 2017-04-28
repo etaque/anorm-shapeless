@@ -13,6 +13,7 @@ import shapeless.labelled.FieldType
 trait GenericDAO[T] {
   def table: String
   def paramsEncoder: ParamsEncoder[T]
+  def naming: String => String = (s) => s
   val idField = "id"
 
   def encode(item: T): Seq[NamedParameter] = {
@@ -22,7 +23,7 @@ trait GenericDAO[T] {
         Nil
 
       case AnormValueGroup(items) =>
-        items.map { case (n, v) => NamedParameter(n, v.value) }
+        items.map { case (n, v) => NamedParameter(naming(n), v.value) }
     }
   }
 
